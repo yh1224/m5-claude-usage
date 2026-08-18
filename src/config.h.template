@@ -1,0 +1,18 @@
+#if !defined(CONFIG_H)
+#define CONFIG_H
+
+// Network
+#define WIFI_SSID ""
+#define WIFI_PASSPHRASE ""
+#define NTP_SERVER "ntp.nict.jp"
+#define TIMEZONE "JST-9"
+
+// Claude
+// `python3 tools/mint_token.py` fills both values in below. They seed the very
+// first boot only: the server rotates the refresh token, and the rotated one
+// is kept in NVS.
+#define CLAUDE_OAUTH_ACCESS_TOKEN ""
+#define CLAUDE_OAUTH_REFRESH_TOKEN ""
+#define CLAUDE_FETCH_INTERVAL_SEC 180
+
+#endif // !defined(CONFIG_H)
