@@ -2,6 +2,8 @@
 
 Shows Claude subscription usage on an M5Stack Core2/CoreS3: the session (5h) and weekly (7d) windows as bars with percentages, refreshed every few minutes.
 
+![Photo](photo.jpg)
+
 The numbers come from `GET https://api.anthropic.com/api/oauth/usage`, the undocumented endpoint behind the `/usage` command of Claude Code.
 
 ## Setup
