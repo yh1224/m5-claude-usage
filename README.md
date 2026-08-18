@@ -6,23 +6,28 @@ The numbers come from `GET https://api.anthropic.com/api/oauth/usage`, the undoc
 
 ## Setup
 
-1. Create the config from the template:
-  ```
-   cp src/config.h.template src/config.h
-  ```
+ 1. Create the config from the template:
 
-   Fill in `WIFI_SSID` and `WIFI_PASSPHRASE`.
-2. Mint an OAuth token pair for the device:
-  ```
-   python3 tools/mint_token.py            # prints an authorize URL
-   python3 tools/mint_token.py '<code>'   # exchange the code shown after approval
-  ```
+    ```
+     cp src/config.h.template src/config.h
+    ```
 
-   This runs the PKCE flow against the Claude Code public client, verifies the result against the usage endpoint, and writes both `#define` lines into `src/config.h` itself. The tokens are never printed, so they stay out of your shell history.
-3. Build and flash:
-  ```
-   pio run -e <env> -t upload
-  ```
+    Fill in `WIFI_SSID` and `WIFI_PASSPHRASE`.
+
+ 2. Mint an OAuth token pair for the device:
+
+    ```
+    python3 tools/mint_token.py            # prints an authorize URL
+    python3 tools/mint_token.py '<code>'   # exchange the code shown after approval
+    ```
+
+    This runs the PKCE flow against the Claude Code public client, verifies the result against the usage endpoint, and writes both `#define` lines into `src/config.h` itself. The tokens are never printed, so they stay out of your shell history.
+
+ 3. Build and flash:
+
+    ```
+    pio run -e <env> -t upload
+    ```
 
 ## Token handling
 
@@ -36,4 +41,3 @@ Refresh tokens carry their own deadline, reported as `refresh_token_expires_in` 
 - Polling is 180 s by default (`CLAUDE_FETCH_INTERVAL_SEC`); failures back off from 30 s to 10 min and the last good values stay on screen, dimmed.
 - Touch button A forces an immediate refresh.
 - `src/config.h` holds live credentials and is gitignored.
-
