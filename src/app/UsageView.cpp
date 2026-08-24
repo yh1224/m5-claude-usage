@@ -24,6 +24,14 @@ constexpr int BLOCK_H = 78;
 // glyphs themselves, and a narrower value would leave the old one showing.
 constexpr int BLOCK_PAD_TOP = 6;
 
+// Window lengths. The API reports when a window resets but not how long it
+// is, so the elapsed fraction cannot be derived without these.
+constexpr long SESSION_WINDOW_SEC = 5 * 3600;
+constexpr long WEEKLY_WINDOW_SEC = 7 * 86400;
+
+// Width of the time marker drawn inside each bar.
+constexpr int MARKER_W = 2;
+
 // Right aligned text in a proportional font shrinks leftwards, so the clock
 // needs its own area cleared for the same reason.
 constexpr int CLOCK_Y = 8;
@@ -55,6 +63,25 @@ int barColor(float percent) {
         return COLOR_WARN;
     }
     return COLOR_OK;
+}
+
+/**
+ * How much of a window has already elapsed, worked backwards from its reset.
+ *
+ * @param resetsAt epoch seconds, 0 when unknown
+ * @param windowSec length of the window
+ * @return 0.0-1.0, or a negative value when it cannot be determined
+ */
+float elapsedFraction(time_t resetsAt, long windowSec) {
+    const time_t now = time(nullptr);
+    // Until NTP has synced the clock sits in 1970, which would pin the marker
+    // to the left edge and read as a genuine "just started".
+    if (resetsAt == 0 || windowSec <= 0 || now < 1700000000) {
+        return -1.0f;
+    }
+    const long remain = static_cast<long>(resetsAt - now);
+    const float fraction = static_cast<float>(windowSec - remain) / windowSec;
+    return std::min(std::max(fraction, 0.0f), 1.0f);
 }
 
 /**
@@ -122,7 +149,8 @@ void UsageView::drawClock() {
     M5.Display.setTextDatum(top_left);
 }
 
-void UsageView::drawBar(int y, const char *label, const UsageWindow &window, bool stale) {
+void UsageView::drawBar(int y, const char *label, const UsageWindow &window,
+                        long windowSec, bool stale) {
     M5.Display.fillRect(0, y - BLOCK_PAD_TOP, SCREEN_W, BLOCK_H + BLOCK_PAD_TOP, COLOR_BG);
 
     const float percent = window.valid ? window.utilization : 0.0f;
@@ -149,6 +177,17 @@ void UsageView::drawBar(int y, const char *label, const UsageWindow &window, boo
     if (fill > 0) {
         M5.Display.fillRoundRect(BAR_X, barY, std::max(fill, 8), BAR_H, 4, color);
     }
+
+    // Where the fill would be if usage tracked the clock exactly, so that fill
+    // past the marker means consuming the window faster than it elapses.
+    // It stays bright when the values are stale: it comes from the local clock
+    // rather than from the fetch, so it is not stale along with them.
+    const float elapsed = window.valid ? elapsedFraction(window.resetsAt, windowSec) : -1.0f;
+    if (elapsed >= 0.0f) {
+        const int markerX = BAR_X + static_cast<int>((BAR_W - MARKER_W) * elapsed + 0.5f);
+        M5.Display.fillRect(markerX, barY + 2, MARKER_W, BAR_H - 4, COLOR_FG);
+    }
+
     M5.Display.drawRoundRect(BAR_X, barY, BAR_W, BAR_H, 4, COLOR_TRACK);
 
     char reset[32];
@@ -159,8 +198,8 @@ void UsageView::drawBar(int y, const char *label, const UsageWindow &window, boo
 }
 
 void UsageView::drawUsage(const Usage &usage, bool stale) {
-    drawBar(BLOCK1_Y, "Session (5h)", usage.session, stale);
-    drawBar(BLOCK2_Y, "Weekly (7d)", usage.weekly, stale);
+    drawBar(BLOCK1_Y, "Session (5h)", usage.session, SESSION_WINDOW_SEC, stale);
+    drawBar(BLOCK2_Y, "Weekly (7d)", usage.weekly, WEEKLY_WINDOW_SEC, stale);
 }
 
 void UsageView::drawStatus(const std::string &message, bool isError) {

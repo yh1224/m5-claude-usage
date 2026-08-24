@@ -7,6 +7,9 @@
 
 /**
  * Renders the two usage windows as labelled bars on the 320x240 display.
+ *
+ * Each bar carries a vertical time marker at the point the window has
+ * elapsed to, so that usage can be read against the pace of the window.
  */
 class UsageView {
 public:
@@ -35,7 +38,15 @@ public:
     void drawClock();
 
 private:
-    void drawBar(int y, const char *label, const UsageWindow &window, bool stale);
+    /**
+     * @param y vertical origin of the block
+     * @param label text above the bar
+     * @param window values to show
+     * @param windowSec length of the window, for placing the time marker
+     * @param stale true to dim the values because the last fetch failed
+     */
+    void drawBar(int y, const char *label, const UsageWindow &window, long windowSec,
+                 bool stale);
 
     std::string _lastClock;
 };

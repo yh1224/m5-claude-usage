@@ -41,5 +41,6 @@ Refresh tokens carry their own deadline, reported as `refresh_token_expires_in` 
 
 - `tools/mint_token.py --refresh` rotates the pair in `config.h` as a smoke test of the same flow the firmware performs.
 - Polling is 180 s by default (`CLAUDE_FETCH_INTERVAL_SEC`); failures back off from 30 s to 10 min and the last good values stay on screen, dimmed.
+- Each bar has a vertical time marker at the point the window has elapsed to. Fill past the marker means the window is being consumed faster than it elapses.
 - Touch button A forces an immediate refresh.
 - `src/config.h` holds live credentials and is gitignored.
