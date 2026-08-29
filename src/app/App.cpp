@@ -111,6 +111,11 @@ void App::loop()
         refresh();
     }
 
+    // Touch button C switches between the bars and the countdown.
+    if (M5.BtnC.wasPressed()) {
+        _view->toggleView();
+    }
+
     if (static_cast<int32_t>(millis() - _nextFetchAt) >= 0) {
         refresh();
     }

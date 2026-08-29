@@ -13,6 +13,7 @@
  * time marker at the point the window has elapsed to, so that usage can be
  * read against the pace of the window. Once a window hits its limit there is
  * nothing left to pace, so the view switches to counting down to the reset.
+ * toggleView() overrides that choice either way.
  */
 class UsageView {
 public:
@@ -36,6 +37,14 @@ public:
     void drawStatus(const std::string &message, bool isError);
 
     /**
+     * Switch to the view the automatic choice is not showing: the countdown
+     * while under the limits, the bars while at them. The override is dropped
+     * again as soon as a limit is reached or cleared, so it never outlives the
+     * state it was made in.
+     */
+    void toggleView();
+
+    /**
      * Redraw whatever follows the local clock: the header clock, and the
      * countdown while it is the view up. Cheap enough to call every loop,
      * each part repaints only once its displayed value changes.
@@ -43,6 +52,12 @@ public:
     void tick();
 
 private:
+    /**
+     * Repaint the content area with the view that is due, clearing it first
+     * when that is not the view already up.
+     */
+    void draw();
+
     void drawClock();
 
     /**
@@ -66,9 +81,17 @@ private:
 
     std::string _lastClock;
 
+    // Last values drawn, kept so that toggleView() can repaint without them.
+    Usage _usage;
+    bool _stale = true;
+
+    bool _limited = false;  // a window is at its limit, i.e. countdown by default
+    bool _flipped = false;  // show the other view than the automatic one
+
     // Countdown state, valid while _countdownShown.
     bool _countdownShown = false;
     std::string _countdownLabel;
+    std::string _countdownTitle;
     time_t _countdownResetsAt = 0;
     long _countdownWindowSec = 0;
     bool _countdownStale = false;

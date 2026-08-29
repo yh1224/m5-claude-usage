@@ -61,6 +61,7 @@ constexpr int COLOR_FG = 0xFFFF;         // white
 constexpr int COLOR_DIM = 0x8410;        // grey
 constexpr int COLOR_TRACK = 0x2124;      // dark grey
 constexpr int COLOR_ACCENT = 0xFD00;     // Claude orange
+constexpr int COLOR_RING = 0x34DF;       // blue
 constexpr int COLOR_OK = 0x07E0;         // green
 constexpr int COLOR_WARN = 0xFFE0;       // yellow
 constexpr int COLOR_HIGH = 0xFC00;       // orange
@@ -71,35 +72,47 @@ constexpr int COLOR_ERROR = 0xF800;
  * The window the countdown is for.
  */
 struct Countdown {
-    const char *label = nullptr;   // nullptr when nothing is at its limit
+    const char *label = nullptr;   // nullptr when there is nothing to count to
+    const char *title = nullptr;
     time_t resetsAt = 0;
     long windowSec = 0;
+    bool limited = false;          // the window is at its limit
 };
 
 /**
  * Pick the window to count down to: the one at its limit whose reset is
- * furthest away, since work only resumes once the last of them has reset.
- * A window whose reset the API left null is skipped, there is nothing to
- * count down to.
+ * furthest away, since work only resumes once the last of them has reset,
+ * or else the one that resets first, which is the next thing to happen.
+ * A window whose reset the API left null is skipped either way, there is
+ * nothing to count down to.
  */
 Countdown countdownTarget(const Usage &usage) {
     const struct {
         const UsageWindow *window;
         const char *label;
+        const char *title;
         long windowSec;
     } candidates[] = {
-        {&usage.session, "5h", SESSION_WINDOW_SEC},
-        {&usage.weekly, "7d", WEEKLY_WINDOW_SEC},
+        {&usage.session, "5h", "Session (5h)", SESSION_WINDOW_SEC},
+        {&usage.weekly, "7d", "Weekly (7d)", WEEKLY_WINDOW_SEC},
     };
 
     Countdown out;
     for (const auto &candidate : candidates) {
         const UsageWindow &window = *candidate.window;
-        if (!window.valid || window.utilization < 100.0f || window.resetsAt == 0) {
+        if (!window.valid || window.resetsAt == 0) {
             continue;
         }
-        if (out.label == nullptr || window.resetsAt > out.resetsAt) {
-            out = {candidate.label, window.resetsAt, candidate.windowSec};
+        const bool limited = window.utilization >= 100.0f;
+        // A window at its limit outranks one that is not, however early that
+        // one resets: the limit is what the wait is actually about.
+        const bool better = out.label == nullptr || (limited && !out.limited) ||
+                            (limited == out.limited &&
+                             (limited ? window.resetsAt > out.resetsAt
+                                      : window.resetsAt < out.resetsAt));
+        if (better) {
+            out = {candidate.label, limited ? "Limit reached" : candidate.title,
+                   window.resetsAt, candidate.windowSec, limited};
         }
     }
     return out;
@@ -298,7 +311,7 @@ void UsageView::drawCountdown(bool force) {
     const float left = _countdownWindowSec > 0
                            ? std::min(static_cast<float>(remain) / _countdownWindowSec, 1.0f)
                            : 0.0f;
-    const int ringColor = _countdownStale ? COLOR_DIM : COLOR_ACCENT;
+    const int ringColor = _countdownStale ? COLOR_DIM : COLOR_RING;
     M5.Display.fillArc(RING_CX, RING_CY, RING_R_IN, RING_R_OUT, RING_START_DEG,
                        RING_START_DEG + 360.0f, COLOR_TRACK);
     if (left > 0.0f) {
@@ -331,24 +344,45 @@ void UsageView::drawCountdown(bool force) {
 }
 
 void UsageView::drawUsage(const Usage &usage, bool stale) {
-    const Countdown target = countdownTarget(usage);
+    const bool limited = countdownTarget(usage).limited;
+    if (limited != _limited) {
+        // The state a manual switch was made in is gone, so is the switch.
+        _limited = limited;
+        _flipped = false;
+    }
+    _usage = usage;
+    _stale = stale;
+    draw();
+}
+
+void UsageView::toggleView() {
+    _flipped = !_flipped;
+    draw();
+}
+
+void UsageView::draw() {
+    const Countdown target = countdownTarget(_usage);
     const bool wasCountdown = _countdownShown;
-    _countdownShown = target.label != nullptr;
+    // At a limit the countdown is the automatic view, below one the bars are;
+    // either way the override shows the other.
+    _countdownShown = target.label != nullptr && (_limited != _flipped);
 
     if (_countdownShown) {
         // Coming from the bars, or from a countdown to another window: what
         // is on screen has to go before anything is drawn over it.
-        const bool changed = !wasCountdown || _countdownLabel != target.label;
+        const bool changed = !wasCountdown || _countdownLabel != target.label ||
+                             _countdownTitle != target.title;
         _countdownLabel = target.label;
+        _countdownTitle = target.title;
         _countdownResetsAt = target.resetsAt;
         _countdownWindowSec = target.windowSec;
-        _countdownStale = stale;
+        _countdownStale = _stale;
         if (changed) {
             M5.Display.fillRect(0, HEADER_H, SCREEN_W, STATUS_Y - HEADER_H, COLOR_BG);
             M5.Display.setFont(&fonts::FreeSans9pt7b);
-            M5.Display.setTextColor(COLOR_CRIT, COLOR_BG);
+            M5.Display.setTextColor(target.limited ? COLOR_CRIT : COLOR_DIM, COLOR_BG);
             M5.Display.setTextDatum(top_center);
-            M5.Display.drawString("Limit reached", CD_COL_CX, CD_TITLE_Y);
+            M5.Display.drawString(_countdownTitle.c_str(), CD_COL_CX, CD_TITLE_Y);
             M5.Display.setTextColor(COLOR_DIM, COLOR_BG);
             M5.Display.drawString("until reset", CD_COL_CX, CD_SUB_Y);
             M5.Display.setTextDatum(top_left);
@@ -361,8 +395,8 @@ void UsageView::drawUsage(const Usage &usage, bool stale) {
     if (wasCountdown) {
         M5.Display.fillRect(0, HEADER_H, SCREEN_W, STATUS_Y - HEADER_H, COLOR_BG);
     }
-    drawBar(BLOCK1_Y, "Session (5h)", usage.session, SESSION_WINDOW_SEC, stale);
-    drawBar(BLOCK2_Y, "Weekly (7d)", usage.weekly, WEEKLY_WINDOW_SEC, stale);
+    drawBar(BLOCK1_Y, "Session (5h)", _usage.session, SESSION_WINDOW_SEC, _stale);
+    drawBar(BLOCK2_Y, "Weekly (7d)", _usage.weekly, WEEKLY_WINDOW_SEC, _stale);
 }
 
 void UsageView::drawStatus(const std::string &message, bool isError) {

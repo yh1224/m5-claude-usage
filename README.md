@@ -43,5 +43,5 @@ Refresh tokens carry their own deadline, reported as `refresh_token_expires_in` 
 - Polling is 180 s by default (`CLAUDE_FETCH_INTERVAL_SEC`); failures back off from 30 s to 10 min and the last good values stay on screen, dimmed.
 - Each bar has a vertical time marker at the point the window has elapsed to. Fill past the marker means the window is being consumed faster than it elapses.
 - Once a window reaches 100% the screen switches to a countdown to its reset: a ring of the time left on the left, the hours and minutes beside it. With both windows at their limit it counts down to the later reset, since that is when work resumes.
-- Touch button A forces an immediate refresh.
+- Touch button A forces an immediate refresh, touch button C switches between the bars and the countdown. Below the limits the countdown is for whichever window resets first. The switch is dropped once a limit is reached or cleared, so the screen goes back to choosing for itself.
 - `src/config.h` holds live credentials and is gitignored.
