@@ -115,6 +115,6 @@ void App::loop()
         refresh();
     }
 
-    _view->drawClock();
+    _view->tick();
     delay(50);
 }

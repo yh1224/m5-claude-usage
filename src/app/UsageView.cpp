@@ -24,6 +24,24 @@ constexpr int BLOCK_H = 78;
 // glyphs themselves, and a narrower value would leave the old one showing.
 constexpr int BLOCK_PAD_TOP = 6;
 
+// Countdown screen: a ring of the time left on the left, the figure and its
+// labels in a column beside it. The rows are sized by the yAdvance of their
+// font (22 at 9pt, 42 at 18pt), so that clearing one never eats into the next,
+// and the column is centred vertically on the ring.
+constexpr int RING_CX = 78;
+constexpr int RING_CY = 126;
+constexpr int RING_R_OUT = 58;
+constexpr int RING_R_IN = 43;
+constexpr int CD_COL_X = 152;
+constexpr int CD_COL_W = SCREEN_W - CD_COL_X - BAR_X;
+constexpr int CD_COL_CX = CD_COL_X + CD_COL_W / 2;
+constexpr int CD_TITLE_Y = 84;
+constexpr int CD_TIME_Y = CD_TITLE_Y + 22;
+constexpr int CD_TIME_H = 42;
+constexpr int CD_SUB_Y = CD_TIME_Y + CD_TIME_H;
+// Angles run clockwise from three o'clock, but a countdown reads from twelve.
+constexpr float RING_START_DEG = -90.0f;
+
 // Window lengths. The API reports when a window resets but not how long it
 // is, so the elapsed fraction cannot be derived without these.
 constexpr long SESSION_WINDOW_SEC = 5 * 3600;
@@ -48,6 +66,44 @@ constexpr int COLOR_WARN = 0xFFE0;       // yellow
 constexpr int COLOR_HIGH = 0xFC00;       // orange
 constexpr int COLOR_CRIT = 0xF800;       // red
 constexpr int COLOR_ERROR = 0xF800;
+
+/**
+ * The window the countdown is for.
+ */
+struct Countdown {
+    const char *label = nullptr;   // nullptr when nothing is at its limit
+    time_t resetsAt = 0;
+    long windowSec = 0;
+};
+
+/**
+ * Pick the window to count down to: the one at its limit whose reset is
+ * furthest away, since work only resumes once the last of them has reset.
+ * A window whose reset the API left null is skipped, there is nothing to
+ * count down to.
+ */
+Countdown countdownTarget(const Usage &usage) {
+    const struct {
+        const UsageWindow *window;
+        const char *label;
+        long windowSec;
+    } candidates[] = {
+        {&usage.session, "5h", SESSION_WINDOW_SEC},
+        {&usage.weekly, "7d", WEEKLY_WINDOW_SEC},
+    };
+
+    Countdown out;
+    for (const auto &candidate : candidates) {
+        const UsageWindow &window = *candidate.window;
+        if (!window.valid || window.utilization < 100.0f || window.resetsAt == 0) {
+            continue;
+        }
+        if (out.label == nullptr || window.resetsAt > out.resetsAt) {
+            out = {candidate.label, window.resetsAt, candidate.windowSec};
+        }
+    }
+    return out;
+}
 
 /**
  * Bar colour by how much of the window is consumed.
@@ -113,6 +169,26 @@ void formatReset(time_t resetsAt, char *out, size_t size) {
     }
 }
 
+/**
+ * Format the countdown figure, e.g. "1h 58m".
+ *
+ * @param remainMin whole minutes left, rounded up, 0 or more
+ * @param out receives the text
+ * @param size size of out
+ */
+void formatCountdown(long remainMin, char *out, size_t size) {
+    const long days = remainMin / 1440;
+    const long hours = (remainMin % 1440) / 60;
+    const long minutes = remainMin % 60;
+    if (days > 0) {
+        snprintf(out, size, "%ldd %ldh %ldm", days, hours, minutes);
+    } else if (hours > 0) {
+        snprintf(out, size, "%ldh %ldm", hours, minutes);
+    } else {
+        snprintf(out, size, "%ldm", minutes);
+    }
+}
+
 } // namespace
 
 void UsageView::begin() {
@@ -127,6 +203,11 @@ void UsageView::begin() {
 
     M5.Display.drawFastHLine(0, HEADER_H - 2, SCREEN_W, COLOR_TRACK);
     _lastClock.clear();
+}
+
+void UsageView::tick() {
+    drawClock();
+    drawCountdown(false);
 }
 
 void UsageView::drawClock() {
@@ -197,7 +278,89 @@ void UsageView::drawBar(int y, const char *label, const UsageWindow &window,
     M5.Display.drawString(window.valid ? reset : "no data", BAR_X, barY + BAR_H + 4);
 }
 
+void UsageView::drawCountdown(bool force) {
+    if (!_countdownShown) {
+        return;
+    }
+
+    long remain = static_cast<long>(_countdownResetsAt - time(nullptr));
+    if (remain < 0) {
+        remain = 0;
+    }
+    // Round up, so that the figure only reads 0m once the window really is up.
+    const long remainMin = (remain + 59) / 60;
+    if (!force && remainMin == _lastRemainMin) {
+        return;
+    }
+    _lastRemainMin = remainMin;
+
+    // The ring drains clockwise from twelve as the wait runs down.
+    const float left = _countdownWindowSec > 0
+                           ? std::min(static_cast<float>(remain) / _countdownWindowSec, 1.0f)
+                           : 0.0f;
+    const int ringColor = _countdownStale ? COLOR_DIM : COLOR_ACCENT;
+    M5.Display.fillArc(RING_CX, RING_CY, RING_R_IN, RING_R_OUT, RING_START_DEG,
+                       RING_START_DEG + 360.0f, COLOR_TRACK);
+    if (left > 0.0f) {
+        M5.Display.fillArc(RING_CX, RING_CY, RING_R_IN, RING_R_OUT, RING_START_DEG,
+                           RING_START_DEG + 360.0f * left, ringColor);
+    }
+
+    M5.Display.setFont(&fonts::FreeSansBold12pt7b);
+    M5.Display.setTextColor(ringColor, COLOR_BG);
+    M5.Display.setTextDatum(middle_center);
+    M5.Display.drawString(_countdownLabel.c_str(), RING_CX, RING_CY);
+
+    // Centred text in a proportional font grows both ways, so the row has to
+    // be cleared rather than painted over.
+    char text[16];
+    formatCountdown(remainMin, text, sizeof(text));
+    M5.Display.fillRect(CD_COL_X, CD_TIME_Y, SCREEN_W - CD_COL_X, CD_TIME_H, COLOR_BG);
+    M5.Display.setFont(&fonts::FreeSansBold18pt7b);
+    // A weekly window still has days to run, which does not fit the column at
+    // the larger size.
+    if (M5.Display.textWidth(text) > CD_COL_W) {
+        M5.Display.setFont(&fonts::FreeSansBold12pt7b);
+    }
+    M5.Display.setTextColor(COLOR_FG, COLOR_BG);
+    // Centred on the row rather than hung from its top, so that the two sizes
+    // sit on the same line as each other and as the ring.
+    M5.Display.setTextDatum(middle_center);
+    M5.Display.drawString(text, CD_COL_CX, CD_TIME_Y + CD_TIME_H / 2);
+    M5.Display.setTextDatum(top_left);
+}
+
 void UsageView::drawUsage(const Usage &usage, bool stale) {
+    const Countdown target = countdownTarget(usage);
+    const bool wasCountdown = _countdownShown;
+    _countdownShown = target.label != nullptr;
+
+    if (_countdownShown) {
+        // Coming from the bars, or from a countdown to another window: what
+        // is on screen has to go before anything is drawn over it.
+        const bool changed = !wasCountdown || _countdownLabel != target.label;
+        _countdownLabel = target.label;
+        _countdownResetsAt = target.resetsAt;
+        _countdownWindowSec = target.windowSec;
+        _countdownStale = stale;
+        if (changed) {
+            M5.Display.fillRect(0, HEADER_H, SCREEN_W, STATUS_Y - HEADER_H, COLOR_BG);
+            M5.Display.setFont(&fonts::FreeSans9pt7b);
+            M5.Display.setTextColor(COLOR_CRIT, COLOR_BG);
+            M5.Display.setTextDatum(top_center);
+            M5.Display.drawString("Limit reached", CD_COL_CX, CD_TITLE_Y);
+            M5.Display.setTextColor(COLOR_DIM, COLOR_BG);
+            M5.Display.drawString("until reset", CD_COL_CX, CD_SUB_Y);
+            M5.Display.setTextDatum(top_left);
+        }
+        drawCountdown(true);
+        return;
+    }
+
+    _lastRemainMin = -1;
+    if (wasCountdown) {
+        M5.Display.fillRect(0, HEADER_H, SCREEN_W, STATUS_Y - HEADER_H, COLOR_BG);
+    }
     drawBar(BLOCK1_Y, "Session (5h)", usage.session, SESSION_WINDOW_SEC, stale);
     drawBar(BLOCK2_Y, "Weekly (7d)", usage.weekly, WEEKLY_WINDOW_SEC, stale);
 }

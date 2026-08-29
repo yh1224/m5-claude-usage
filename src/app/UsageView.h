@@ -1,23 +1,26 @@
 #if !defined(APP_USAGEVIEW_H)
 #define APP_USAGEVIEW_H
 
+#include <ctime>
 #include <string>
 
 #include "lib/claude_api.h"
 
 /**
- * Renders the two usage windows as labelled bars on the 320x240 display.
+ * Renders the two usage windows on the 320x240 display.
  *
- * Each bar carries a vertical time marker at the point the window has
- * elapsed to, so that usage can be read against the pace of the window.
+ * Normally both windows are shown as labelled bars, each carrying a vertical
+ * time marker at the point the window has elapsed to, so that usage can be
+ * read against the pace of the window. Once a window hits its limit there is
+ * nothing left to pace, so the view switches to counting down to the reset.
  */
 class UsageView {
 public:
     void begin();
 
     /**
-     * Redraw the bars. Call only when something changed, it repaints the
-     * whole content area.
+     * Redraw the content area. Call only when something changed, it repaints
+     * the whole area.
      *
      * @param usage values to show
      * @param stale true to dim the values because the last fetch failed
@@ -33,11 +36,15 @@ public:
     void drawStatus(const std::string &message, bool isError);
 
     /**
-     * Redraw the clock in the header. Cheap enough to call every second.
+     * Redraw whatever follows the local clock: the header clock, and the
+     * countdown while it is the view up. Cheap enough to call every loop,
+     * each part repaints only once its displayed value changes.
      */
-    void drawClock();
+    void tick();
 
 private:
+    void drawClock();
+
     /**
      * @param y vertical origin of the block
      * @param label text above the bar
@@ -48,7 +55,24 @@ private:
     void drawBar(int y, const char *label, const UsageWindow &window, long windowSec,
                  bool stale);
 
+    /**
+     * Redraw the countdown to the reset of the window it is showing. Does
+     * nothing while the bars are up.
+     *
+     * @param force true to repaint even when the remaining minutes are
+     *              unchanged, needed after the content area was cleared
+     */
+    void drawCountdown(bool force);
+
     std::string _lastClock;
+
+    // Countdown state, valid while _countdownShown.
+    bool _countdownShown = false;
+    std::string _countdownLabel;
+    time_t _countdownResetsAt = 0;
+    long _countdownWindowSec = 0;
+    bool _countdownStale = false;
+    long _lastRemainMin = -1;
 };
 
 #endif // !defined(APP_USAGEVIEW_H)
