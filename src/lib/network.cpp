@@ -102,3 +102,12 @@ void syncTime(const char *tz, const char *ntpServer) {
         M5.Display.println(ss.str().c_str());
     }
 }
+
+/**
+ * Whether the clock has been set by NTP. Until then it sits in 1970.
+ *
+ * @return true: synchronized, false: not yet
+ */
+bool clockSynced() {
+    return time(nullptr) >= 1700000000;
+}

@@ -7,4 +7,6 @@ void setMDnsHostname(const char *hostname);
 
 void syncTime(const char *tz, const char *ntpServer);
 
+bool clockSynced();
+
 #endif // !defined(LIB_NETWORK_H)

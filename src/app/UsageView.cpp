@@ -3,6 +3,8 @@
 
 #include "app/UsageView.h"
 
+#include "lib/network.h"
+
 namespace {
 
 constexpr int SCREEN_W = 320;
@@ -49,6 +51,10 @@ constexpr long WEEKLY_WINDOW_SEC = 7 * 86400;
 
 // Width of the time marker drawn inside each bar.
 constexpr int MARKER_W = 2;
+
+// Least marker position the pace is taken against, so that a fresh window does
+// not read as a runaway pace at the first message.
+constexpr float PACE_FLOOR_PERCENT = 20.0f;
 
 // Right aligned text in a proportional font shrinks leftwards, so the clock
 // needs its own area cleared for the same reason.
@@ -119,16 +125,37 @@ Countdown countdownTarget(const Usage &usage) {
 }
 
 /**
- * Bar colour by how much of the window is consumed.
+ * Bar colour by how far usage runs ahead of the time marker. The pace is usage
+ * over the elapsed share of the window, so 1.0 reaches the limit right at the
+ * reset and anything above it reaches the limit before.
+ *
+ * @param percent utilization, 0-100
+ * @param elapsed 0.0-1.0, or negative when unknown
  */
-int barColor(float percent) {
-    if (percent >= 90.0f) {
+int barColor(float percent, float elapsed) {
+    if (percent >= 100.0f) {
         return COLOR_CRIT;
     }
-    if (percent >= 75.0f) {
+    // Without the clock there is no marker to compare against, so fall back to
+    // how much of the window is consumed.
+    if (elapsed < 0.0f) {
+        return percent >= 90.0f ? COLOR_CRIT
+               : percent >= 75.0f ? COLOR_HIGH
+               : percent >= 50.0f ? COLOR_WARN
+                                  : COLOR_OK;
+    }
+    // Early in a window the marker is near zero and the slightest use would
+    // read as a runaway pace, so the pace is taken against no less than the
+    // floor.
+    const float marker = std::max(elapsed * 100.0f, PACE_FLOOR_PERCENT);
+    const float pace = percent / marker;
+    if (pace >= 1.25f) {
+        return COLOR_CRIT;
+    }
+    if (pace > 1.0f) {
         return COLOR_HIGH;
     }
-    if (percent >= 50.0f) {
+    if (pace >= 0.75f) {
         return COLOR_WARN;
     }
     return COLOR_OK;
@@ -142,12 +169,12 @@ int barColor(float percent) {
  * @return 0.0-1.0, or a negative value when it cannot be determined
  */
 float elapsedFraction(time_t resetsAt, long windowSec) {
-    const time_t now = time(nullptr);
     // Until NTP has synced the clock sits in 1970, which would pin the marker
     // to the left edge and read as a genuine "just started".
-    if (resetsAt == 0 || windowSec <= 0 || now < 1700000000) {
+    if (resetsAt == 0 || windowSec <= 0 || !clockSynced()) {
         return -1.0f;
     }
+    const time_t now = time(nullptr);
     const long remain = static_cast<long>(resetsAt - now);
     const float fraction = static_cast<float>(windowSec - remain) / windowSec;
     return std::min(std::max(fraction, 0.0f), 1.0f);
@@ -251,7 +278,8 @@ void UsageView::drawBar(int y, const char *label, const UsageWindow &window,
     const int fill = window.valid
                          ? static_cast<int>(BAR_W * std::min(percent, 100.0f) / 100.0f + 0.5f)
                          : 0;
-    const int color = stale || !window.valid ? COLOR_DIM : barColor(percent);
+    const float elapsed = window.valid ? elapsedFraction(window.resetsAt, windowSec) : -1.0f;
+    const int color = stale || !window.valid ? COLOR_DIM : barColor(percent, elapsed);
 
     M5.Display.setFont(&fonts::FreeSans9pt7b);
     M5.Display.setTextColor(stale ? COLOR_DIM : COLOR_FG, COLOR_BG);
@@ -276,7 +304,6 @@ void UsageView::drawBar(int y, const char *label, const UsageWindow &window,
     // past the marker means consuming the window faster than it elapses.
     // It stays bright when the values are stale: it comes from the local clock
     // rather than from the fetch, so it is not stale along with them.
-    const float elapsed = window.valid ? elapsedFraction(window.resetsAt, windowSec) : -1.0f;
     if (elapsed >= 0.0f) {
         const int markerX = BAR_X + static_cast<int>((BAR_W - MARKER_W) * elapsed + 0.5f);
         M5.Display.fillRect(markerX, barY + 2, MARKER_W, BAR_H - 4, COLOR_FG);
