@@ -45,9 +45,16 @@ public:
     void toggleView();
 
     /**
-     * Redraw whatever follows the local clock: the header clock, and the
-     * countdown while it is the view up. Cheap enough to call every loop,
-     * each part repaints only once its displayed value changes.
+     * Redraw the time of the last successful fetch at the top right.
+     *
+     * @param text time to show, e.g. "12:34"
+     */
+    void drawUpdated(const std::string &text);
+
+    /**
+     * Redraw whatever follows the local clock: the countdown while it is the
+     * view up. Cheap enough to call every loop, it repaints only once its
+     * displayed value changes.
      */
     void tick();
 
@@ -57,8 +64,6 @@ private:
      * when that is not the view already up.
      */
     void draw();
-
-    void drawClock();
 
     /**
      * @param y vertical origin of the block
@@ -78,8 +83,6 @@ private:
      *              unchanged, needed after the content area was cleared
      */
     void drawCountdown(bool force);
-
-    std::string _lastClock;
 
     // Last values drawn, kept so that toggleView() can repaint without them.
     Usage _usage;

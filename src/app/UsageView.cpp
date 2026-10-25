@@ -56,11 +56,11 @@ constexpr int MARKER_W = 2;
 // not read as a runaway pace at the first message.
 constexpr float PACE_FLOOR_PERCENT = 20.0f;
 
-// Right aligned text in a proportional font shrinks leftwards, so the clock
-// needs its own area cleared for the same reason.
-constexpr int CLOCK_Y = 8;
-constexpr int CLOCK_H = 22;
-constexpr int CLOCK_W = 70;
+// Right aligned text in a proportional font shrinks leftwards, so the update
+// time needs its own area cleared for the same reason.
+constexpr int UPDATED_Y = 8;
+constexpr int UPDATED_H = 22;
+constexpr int UPDATED_W = 70;
 
 constexpr int COLOR_BG = 0x0000;         // black
 constexpr int COLOR_FG = 0xFFFF;         // white
@@ -242,31 +242,18 @@ void UsageView::begin() {
     M5.Display.print("Claude Usage");
 
     M5.Display.drawFastHLine(0, HEADER_H - 2, SCREEN_W, COLOR_TRACK);
-    _lastClock.clear();
 }
 
 void UsageView::tick() {
-    drawClock();
     drawCountdown(false);
 }
 
-void UsageView::drawClock() {
-    struct tm now{};
-    if (!getLocalTime(&now, 0)) {
-        return;
-    }
-    char text[6];
-    strftime(text, sizeof(text), "%H:%M", &now);
-    if (_lastClock == text) {
-        return;
-    }
-    _lastClock = text;
-
-    M5.Display.fillRect(SCREEN_W - BAR_X - CLOCK_W, CLOCK_Y, CLOCK_W, CLOCK_H, COLOR_BG);
+void UsageView::drawUpdated(const std::string &text) {
+    M5.Display.fillRect(SCREEN_W - BAR_X - UPDATED_W, UPDATED_Y, UPDATED_W, UPDATED_H, COLOR_BG);
     M5.Display.setFont(&fonts::FreeSans9pt7b);
     M5.Display.setTextColor(COLOR_DIM, COLOR_BG);
     M5.Display.setTextDatum(top_right);
-    M5.Display.drawString(text, SCREEN_W - BAR_X, 12);
+    M5.Display.drawString(text.c_str(), SCREEN_W - BAR_X, 12);
     M5.Display.setTextDatum(top_left);
 }
 

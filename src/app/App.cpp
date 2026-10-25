@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <M5Unified.h>
+#include <sys/time.h>
 
 #include "app/App.h"
 
@@ -14,6 +15,36 @@ namespace {
 constexpr uint32_t FETCH_INTERVAL_SEC = CLAUDE_FETCH_INTERVAL_SEC;
 constexpr uint32_t BACKOFF_MIN_SEC = 30;
 constexpr uint32_t BACKOFF_MAX_SEC = 600;
+
+// How far past a boundary a fetch is aimed. millis() and the wall clock drift
+// apart slightly, and a fetch that fired just short of the minute would be
+// stamped with the minute before.
+constexpr uint32_t FETCH_MARGIN_MS = 1000;
+// Closest a scheduled fetch may follow the one before it.
+constexpr uint32_t FETCH_MIN_GAP_MS = 10000;
+
+/**
+ * Milliseconds until just past the next multiple of the fetch interval in UTC,
+ * so that fetches land on the minute (for a 60 s interval) rather than
+ * drifting with whenever the device booted.
+ */
+uint32_t msUntilNextFetch() {
+    constexpr uint64_t intervalMs = FETCH_INTERVAL_SEC * 1000ULL;
+    // Without NTP the boundaries mean nothing.
+    if (!clockSynced()) {
+        return intervalMs;
+    }
+    struct timeval tv{};
+    gettimeofday(&tv, nullptr);
+    const uint64_t nowMs = static_cast<uint64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
+    uint64_t waitMs = intervalMs - nowMs % intervalMs + FETCH_MARGIN_MS;
+    // A manual refresh or a retry close to a boundary would otherwise be
+    // followed by another fetch almost at once, so skip to the one after.
+    if (waitMs < FETCH_MIN_GAP_MS) {
+        waitMs += intervalMs;
+    }
+    return waitMs;
+}
 
 } // namespace
 
@@ -63,16 +94,17 @@ void App::refresh()
 
         char stamp[16];
         struct tm now{};
-        if (getLocalTime(&now, 0)) {
-            strftime(stamp, sizeof(stamp), "%H:%M:%S", &now);
+        if (clockSynced() && getLocalTime(&now, 0)) {
+            strftime(stamp, sizeof(stamp), "%H:%M", &now);
         } else {
-            snprintf(stamp, sizeof(stamp), "--:--:--");
+            snprintf(stamp, sizeof(stamp), "--:--");
         }
         Serial.printf("Usage: session=%.0f%% weekly=%.0f%%\n",
                       _usage.session.utilization, _usage.weekly.utilization);
         _view->drawUsage(_usage, false);
-        _view->drawStatus(std::string("Updated ") + stamp, false);
-        _nextFetchAt = millis() + FETCH_INTERVAL_SEC * 1000;
+        _view->drawUpdated(stamp);
+        _view->drawStatus("", false);
+        _nextFetchAt = millis() + msUntilNextFetch();
         return;
     }
 
